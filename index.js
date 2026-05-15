@@ -45,24 +45,55 @@ app.post("/webhooks", async (req, res) => {
     console.log(`🔔  EVENT RECEIVED: ${scope}`);
     console.log(`📦  PRODUCT ID: ${data.id}`);
 
-    // Respond 200 OK immediately so BigCommerce doesn't think we failed
+    // 1. Respond 200 OK immediately
     res.status(200).json({ success: true });
 
-    // Only proceed if it's a product event
+    // 2. Perform the logic asynchronously
     if (data && data.type === "product") {
         try {
-            console.log(`🚀  Creating Custom Field "VIP: VIP" for Product ${data.id}...`);
+            // STEP A: Get the product to find its categories
+            console.log(`🔍  Fetching categories for product ${data.id}...`);
+            const productRes = await bcApi.get(`/catalog/products/${data.id}`);
+            const productCategories = productRes.data.data.categories;
 
-            // Using the pre-configured bcApi (axios)
-            const response = await bcApi.post(`/catalog/products/${data.id}/custom-fields`, {
-                name: "VIP",
-                value: "VIP"
-            });
+            if (!productCategories || productCategories.length === 0) {
+                console.log("ℹ️   Skipping: Product has no categories.");
+                console.log("===================================================\n");
+                return;
+            }
 
-            console.log("✅  API Response:", JSON.stringify(response.data.data, null, 2));
+            // STEP B: Get details for these categories to check the name
+            const catIds = productCategories.join(",");
+            const categoriesRes = await bcApi.get(`/catalog/categories?id:in=${catIds}`);
+            const categoryDetails = categoriesRes.data.data;
+
+            // Check if any of the categories are named "VIP"
+            const isVipProduct = categoryDetails.some(cat => cat.name.toUpperCase() === "VIP");
+
+            if (isVipProduct) {
+                console.log(`⭐  Confirmed: Product ${data.id} is in the VIP category!`);
+                console.log(`🚀  Adding VIP custom field...`);
+
+                try {
+                    const cfRes = await bcApi.post(`/catalog/products/${data.id}/custom-fields`, {
+                        name: "VIP",
+                        value: "VIP"
+                    });
+                    console.log(`✅  Custom Field Created! ID: ${cfRes.data.data.id}`);
+                } catch (cfErr) {
+                    if (cfErr.response && cfErr.response.status === 422) {
+                        console.log(`ℹ️   Note: Custom field already exists.`);
+                    } else {
+                        throw cfErr;
+                    }
+                }
+            } else {
+                console.log(`⏭️   Skipping: Product ${data.id} is NOT in a VIP category.`);
+            }
+
         } catch (err) {
             const errorMsg = err.response ? JSON.stringify(err.response.data) : err.message;
-            console.error("❌  API Error:", errorMsg);
+            console.error("❌  Error in VIP check logic:", errorMsg);
         }
     }
     console.log("===================================================\n");
