@@ -88,7 +88,19 @@ app.post("/webhooks", async (req, res) => {
                     }
                 }
             } else {
-                console.log(`⏭️   Skipping: Product ${data.id} is NOT in a VIP category.`);
+                console.log(`⏭️   Product ${data.id} is NOT in a VIP category. Checking for cleanup...`);
+                
+                // STEP C: Check if the VIP field exists and delete it if it does
+                const cfListRes = await bcApi.get(`/catalog/products/${data.id}/custom-fields`);
+                const existingVipField = cfListRes.data.data.find(f => f.name === "VIP" && f.value === "VIP");
+
+                if (existingVipField) {
+                    console.log(`🗑️   Cleaning up: Deleting VIP custom field (ID: ${existingVipField.id}) from product ${data.id}...`);
+                    await bcApi.delete(`/catalog/products/${data.id}/custom-fields/${existingVipField.id}`);
+                    console.log("✅  Custom field deleted.");
+                } else {
+                    console.log("ℹ️   Nothing to clean up.");
+                }
             }
 
         } catch (err) {
