@@ -45,10 +45,7 @@ app.post("/webhooks", async (req, res) => {
     console.log(`🔔  EVENT RECEIVED: ${scope}`);
     console.log(`📦  PRODUCT ID: ${data.id}`);
 
-    // 1. Respond 200 OK immediately
-    res.status(200).json({ success: true });
-
-    // 2. Perform the logic asynchronously
+    // Perform the logic
     if (data && data.type === "product") {
         try {
             // STEP A: Get the product to find its categories
@@ -58,57 +55,57 @@ app.post("/webhooks", async (req, res) => {
 
             if (!productCategories || productCategories.length === 0) {
                 console.log("ℹ️   Skipping: Product has no categories.");
-                console.log("===================================================\n");
-                return;
-            }
+            } else {
+                // STEP B: Get details for these categories to check the name
+                const catIds = productCategories.join(",");
+                const categoriesRes = await bcApi.get(`/catalog/categories?id:in=${catIds}`);
+                const categoryDetails = categoriesRes.data.data;
 
-            // STEP B: Get details for these categories to check the name
-            const catIds = productCategories.join(",");
-            const categoriesRes = await bcApi.get(`/catalog/categories?id:in=${catIds}`);
-            const categoryDetails = categoriesRes.data.data;
+                // Check if any of the categories are named "VIP"
+                const isVipProduct = categoryDetails.some(cat => cat.name.toUpperCase() === "VIP");
 
-            // Check if any of the categories are named "VIP"
-            const isVipProduct = categoryDetails.some(cat => cat.name.toUpperCase() === "VIP");
+                if (isVipProduct) {
+                    console.log(`⭐  Confirmed: Product ${data.id} is in the VIP category!`);
+                    console.log(`🚀  Adding VIP custom field...`);
 
-            if (isVipProduct) {
-                console.log(`⭐  Confirmed: Product ${data.id} is in the VIP category!`);
-                console.log(`🚀  Adding VIP custom field...`);
+                    try {
+                        const cfRes = await bcApi.post(`/catalog/products/${data.id}/custom-fields`, {
+                            name: "VIP",
+                            value: "VIP"
+                        });
+                        console.log(`✅  Custom Field Created! ID: ${cfRes.data.data.id}`);
+                    } catch (cfErr) {
+                        if (cfErr.response && cfErr.response.status === 422) {
+                            console.log(`ℹ️   Note: Custom field already exists.`);
+                        } else {
+                            throw cfErr;
+                        }
+                    }
+                } else {
+                    console.log(`⏭️   Product ${data.id} is NOT in a VIP category. Checking for cleanup...`);
+                    
+                    const cfListRes = await bcApi.get(`/catalog/products/${data.id}/custom-fields`);
+                    const existingVipField = cfListRes.data.data.find(f => f.name === "VIP" && f.value === "VIP");
 
-                try {
-                    const cfRes = await bcApi.post(`/catalog/products/${data.id}/custom-fields`, {
-                        name: "VIP",
-                        value: "VIP"
-                    });
-                    console.log(`✅  Custom Field Created! ID: ${cfRes.data.data.id}`);
-                } catch (cfErr) {
-                    if (cfErr.response && cfErr.response.status === 422) {
-                        console.log(`ℹ️   Note: Custom field already exists.`);
+                    if (existingVipField) {
+                        console.log(`🗑️   Cleaning up: Deleting VIP custom field (ID: ${existingVipField.id}) from product ${data.id}...`);
+                        await bcApi.delete(`/catalog/products/${data.id}/custom-fields/${existingVipField.id}`);
+                        console.log("✅  Custom field deleted.");
                     } else {
-                        throw cfErr;
+                        console.log("ℹ️   Nothing to clean up.");
                     }
                 }
-            } else {
-                console.log(`⏭️   Product ${data.id} is NOT in a VIP category. Checking for cleanup...`);
-                
-                // STEP C: Check if the VIP field exists and delete it if it does
-                const cfListRes = await bcApi.get(`/catalog/products/${data.id}/custom-fields`);
-                const existingVipField = cfListRes.data.data.find(f => f.name === "VIP" && f.value === "VIP");
-
-                if (existingVipField) {
-                    console.log(`🗑️   Cleaning up: Deleting VIP custom field (ID: ${existingVipField.id}) from product ${data.id}...`);
-                    await bcApi.delete(`/catalog/products/${data.id}/custom-fields/${existingVipField.id}`);
-                    console.log("✅  Custom field deleted.");
-                } else {
-                    console.log("ℹ️   Nothing to clean up.");
-                }
             }
-
         } catch (err) {
             const errorMsg = err.response ? JSON.stringify(err.response.data) : err.message;
             console.error("❌  Error in VIP check logic:", errorMsg);
         }
     }
+    
     console.log("===================================================\n");
+    
+    // Respond 200 OK at the END so Vercel doesn't kill the function early
+    res.status(200).json({ success: true });
 });
 
 // =====================================================================
