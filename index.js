@@ -8,7 +8,7 @@ const app = express();
 const STORE_HASH = process.env.STORE_HASH;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 const PORT = process.env.PORT || 3000;
-const NGROK_URL = process.env.NGROK_URL;
+const BASE_URL = process.env.BASE_URL || process.env.NGROK_URL;
 
 const BC_API_BASE = `https://api.bigcommerce.com/stores/${STORE_HASH}/v3`;
 
@@ -116,13 +116,15 @@ app.post("/webhooks", async (req, res) => {
 //  Call this ONCE after you start ngrok to register both webhooks.
 // =====================================================================
 app.get("/register", async (req, res) => {
-    if (!NGROK_URL) {
+    // Properly trim and remove ALL trailing slashes
+    const baseUrl = (BASE_URL || "").trim().replace(/\/+$/, "");
+    
+    if (!baseUrl) {
         return res.status(500).json({
-            error: 'NGROK_URL is not set in .env file. Please add it and restart the server.',
+            error: 'BASE_URL is not set in environment variables.',
         });
     }
 
-    const baseUrl = NGROK_URL.trim().replace(/\/+$/, "");
     const destination = baseUrl + "/webhooks";
 
     const webhooksToRegister = [
@@ -215,28 +217,29 @@ app.get("/", (_req, res) => {
     res.json({
         status: "running",
         message: "BigCommerce Webhook Listener",
-        ngrok_url: NGROK_URL || "NOT SET",
+        base_url: BASE_URL || "NOT SET",
         endpoints: {
             "GET  /": "Health check (this page)",
-            "GET  /register": "Register webhooks using NGROK_URL from .env",
+            "GET  /register": "Register webhooks using BASE_URL from env",
             "GET  /list": "List all registered webhooks",
-            "POST /webhooks": "Webhook callback endpoint (BigCommerce posts here)",
+            "POST /webhooks": "Webhook callback endpoint",
             "DELETE /delete/:id": "Delete a webhook by ID",
         },
     });
 });
 
-// ----- Start Server -----
-app.listen(PORT, function () {
-    console.log("\n==================================================");
-    console.log("   BigCommerce Webhook Listener");
-    console.log("==================================================");
-    console.log("   Server running at: http://localhost:" + PORT);
-    console.log("   Store Hash       : " + STORE_HASH);
-    console.log("   Ngrok URL        : " + (NGROK_URL || "NOT SET"));
-    console.log("==================================================");
-    console.log("   NEXT STEPS:");
-    console.log("   1. Make sure ngrok is running:  ngrok http 3000");
-    console.log("   2. Visit: " + (NGROK_URL || "http://localhost:" + PORT) + "/register");
-    console.log("==================================================\n");
-});
+// ----- Start Server (Only locally) -----
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, function () {
+        console.log("\n==================================================");
+        console.log("   BigCommerce Webhook Listener (LOCAL)");
+        console.log("==================================================");
+        console.log("   Server running at: http://localhost:" + PORT);
+        console.log("   Store Hash       : " + STORE_HASH);
+        console.log("   Base URL         : " + (BASE_URL || "NOT SET"));
+        console.log("==================================================");
+    });
+}
+
+// Export for Vercel
+module.exports = app;
